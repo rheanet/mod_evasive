@@ -133,6 +133,13 @@ static const char *whitelist(cmd_parms *cmd, void *dconfig, const char *ip)
   return NULL;
 }
 
+static const char *get_client_token(request_rec *r) {
+    const char *client_token = apr_table_get(r->headers_in, "X-App-Token");
+    if (client_token == NULL) {
+        client_token = r->useragent_ip;
+    }
+    return client_token;
+}
 
 static int access_checker(request_rec *r) 
 {
