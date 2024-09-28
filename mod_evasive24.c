@@ -39,9 +39,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "http_log.h"
 #include "http_request.h"
 
-#undef HTTP_FORBIDDEN
-#define HTTP_FORBIDDEN 429
-
 module AP_MODULE_DECLARE_DATA evasive20_module;
 
 pid_t getpid(void);
@@ -156,27 +153,30 @@ static int access_checker(request_rec *r)
       if (is_whitelisted(r->useragent_ip))
         return OK;
 
+      /* Primero, obtenemos el client_token o la IP */
+      const char *client_token = get_client_token(r);
+
       /* First see if the IP itself is on "hold" */
-      n = ntt_find(hit_list, r->useragent_ip);
+      n = ntt_find(hit_list, client_token);
 
       if (n != NULL && t-n->timestamp<blocking_period) {
  
         /* If the IP is on "hold", make it wait longer in 403 land */
-        ret = HTTP_FORBIDDEN;
+        ret = HTTP_TOO_MANY_REQUESTS;
         n->timestamp = time(NULL);
 
       /* Not on hold, check hit stats */
       } else {
 
         /* Has URI been hit too much? */
-        snprintf(hash_key, 2048, "%s_%s", r->useragent_ip, r->uri);
+        snprintf(hash_key, 2048, "%s_%s", client_token, r->uri);
         n = ntt_find(hit_list, hash_key);
         if (n != NULL) {
 
           /* If URI is being hit too much, add to "hold" list and 403 */
           if (t-n->timestamp<page_interval && n->count>=page_count) {
-            ret = HTTP_FORBIDDEN;
-            ntt_insert(hit_list, r->useragent_ip, time(NULL));
+            ret = HTTP_TOO_MANY_REQUESTS;
+            ntt_insert(hit_list, client_token, time(NULL));
           } else {
 
             /* Reset our hit count list as necessary */
@@ -191,14 +191,14 @@ static int access_checker(request_rec *r)
         }
 
         /* Has site been hit too much? */
-        snprintf(hash_key, 2048, "%s_SITE", r->useragent_ip);
+        snprintf(hash_key, 2048, "%s_SITE", client_token);
         n = ntt_find(hit_list, hash_key);
         if (n != NULL) {
 
           /* If site is being hit too much, add to "hold" list and 403 */
           if (t-n->timestamp<site_interval && n->count>=site_count) {
-            ret = HTTP_FORBIDDEN;
-            ntt_insert(hit_list, r->useragent_ip, time(NULL));
+            ret = HTTP_TOO_MANY_REQUESTS;
+            ntt_insert(hit_list, client_token, time(NULL));
           } else {
 
             /* Reset our hit count list as necessary */
@@ -214,32 +214,32 @@ static int access_checker(request_rec *r)
       }
 
       /* Perform email notification and system functions */
-      if (ret == HTTP_FORBIDDEN) {
+      if (ret == HTTP_TOO_MANY_REQUESTS) {
         char filename[1024];
         struct stat s;
         FILE *file;
 
-        snprintf(filename, sizeof(filename), "%s/dos-%s", log_dir != NULL ? log_dir : DEFAULT_LOG_DIR, r->useragent_ip);
+        snprintf(filename, sizeof(filename), "%s/dos-%s", log_dir != NULL ? log_dir : DEFAULT_LOG_DIR, client_token);
         if (stat(filename, &s)) {
           file = fopen(filename, "w");
           if (file != NULL) {
             fprintf(file, "%d\n", getpid());
             fclose(file);
 
-            LOG(LOG_ALERT, "Blacklisting address %s: possible DoS attack.", r->useragent_ip);
+            LOG(LOG_ALERT, "Blacklisting address %s: possible DoS attack.", client_token);
             if (email_notify != NULL) {
               snprintf(filename, sizeof(filename), MAILER, email_notify);
               file = popen(filename, "w");
               if (file != NULL) {
                 fprintf(file, "To: %s\n", email_notify);
-                fprintf(file, "Subject: HTTP BLACKLIST %s\n\n", r->useragent_ip);
-                fprintf(file, "mod_evasive HTTP Blacklisted %s\n", r->useragent_ip);
+                fprintf(file, "Subject: HTTP BLACKLIST %s\n\n", client_token);
+                fprintf(file, "mod_evasive HTTP Blacklisted %s\n", client_token);
                 pclose(file);
               }
             }
 
             if (system_command != NULL) {
-              snprintf(filename, sizeof(filename), system_command, r->useragent_ip);
+              snprintf(filename, sizeof(filename), system_command, client_token);
               system(filename);
             }
  
@@ -249,13 +249,13 @@ static int access_checker(request_rec *r)
 
         } /* if (temp file does not exist) */
 
-      } /* if (ret == HTTP_FORBIDDEN) */
+      } /* if (ret == HTTP_TOO_MANY_REQUESTS) */
 
     } /* if (r->prev == NULL && r->main == NULL && hit_list != NULL) */
 
     /* END DoS Evasive Maneuvers Code */
 
-    if (ret == HTTP_FORBIDDEN
+    if (ret == HTTP_TOO_MANY_REQUESTS
 	&& (ap_satisfies(r) != SATISFY_ANY || !ap_some_auth_required(r))) {
         ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
             "client denied by server configuration: %s",
