@@ -39,6 +39,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "http_log.h"
 #include "http_request.h"
 
+#undef HTTP_FORBIDDEN
+#define HTTP_FORBIDDEN 429
+
 module AP_MODULE_DECLARE_DATA evasive20_module;
 
 pid_t getpid(void);
