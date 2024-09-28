@@ -114,11 +114,11 @@ int is_whitelisted(const char *ip);
 
 /* END DoS Evasive Maneuvers Globals */
 
-static void * create_hit_list(apr_pool_t *p, server_rec *s) 
+static void *create_hit_list(apr_pool_t *p, server_rec *s) 
 {
     /* Create a new hit list for this listener */
-
     hit_list = ntt_create(hash_table_size);
+    return NULL;
 }
 
 static const char *whitelist(cmd_parms *cmd, void *dconfig, const char *ip)
@@ -302,6 +302,7 @@ static apr_status_t destroy_hit_list(void *not_used) {
   ntt_destroy(hit_list);
   free(email_notify);
   free(system_command);
+  return APR_SUCCESS;
 }
 
 
