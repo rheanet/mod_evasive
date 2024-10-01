@@ -39,6 +39,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "http_log.h"
 #include "http_request.h"
 
+#define HTTP_CUSTOM_ERROR 429
+
 module AP_MODULE_DECLARE_DATA evasive20_module;
 
 pid_t getpid(void);
@@ -130,12 +132,16 @@ static const char *whitelist(cmd_parms *cmd, void *dconfig, const char *ip)
   return NULL;
 }
 
-static const char *get_client_token(request_rec *r) {
-    const char *client_token = apr_table_get(r->headers_in, "X-App-Token");
-    if (client_token == NULL) {
-        client_token = r->useragent_ip;
-    }
-    return client_token;
+static const char *get_client_token(request_rec *r) 
+{
+  const char *client_token = apr_table_get(r->headers_in, "X-App-Token");
+
+  // Si el token no existe o no tiene 32 caracteres, hacemos fallback a la IP
+  if (client_token == NULL || strlen(client_token) != 32) {
+      client_token = r->useragent_ip;
+  }
+
+  return client_token;
 }
 
 static int access_checker(request_rec *r) 
@@ -162,7 +168,7 @@ static int access_checker(request_rec *r)
       if (n != NULL && t-n->timestamp<blocking_period) {
  
         /* If the IP is on "hold", make it wait longer in 403 land */
-        ret = HTTP_TOO_MANY_REQUESTS;
+        ret = HTTP_CUSTOM_ERROR;
         n->timestamp = time(NULL);
 
       /* Not on hold, check hit stats */
@@ -175,7 +181,7 @@ static int access_checker(request_rec *r)
 
           /* If URI is being hit too much, add to "hold" list and 403 */
           if (t-n->timestamp<page_interval && n->count>=page_count) {
-            ret = HTTP_TOO_MANY_REQUESTS;
+            ret = HTTP_CUSTOM_ERROR;
             ntt_insert(hit_list, client_token, time(NULL));
           } else {
 
@@ -197,7 +203,7 @@ static int access_checker(request_rec *r)
 
           /* If site is being hit too much, add to "hold" list and 403 */
           if (t-n->timestamp<site_interval && n->count>=site_count) {
-            ret = HTTP_TOO_MANY_REQUESTS;
+            ret = HTTP_CUSTOM_ERROR;
             ntt_insert(hit_list, client_token, time(NULL));
           } else {
 
@@ -214,7 +220,7 @@ static int access_checker(request_rec *r)
       }
 
       /* Perform email notification and system functions */
-      if (ret == HTTP_TOO_MANY_REQUESTS) {
+      if (ret == HTTP_CUSTOM_ERROR) {
         char filename[1024];
         struct stat s;
         FILE *file;
@@ -249,13 +255,13 @@ static int access_checker(request_rec *r)
 
         } /* if (temp file does not exist) */
 
-      } /* if (ret == HTTP_TOO_MANY_REQUESTS) */
+      } /* if (ret == HTTP_CUSTOM_ERROR) */
 
     } /* if (r->prev == NULL && r->main == NULL && hit_list != NULL) */
 
     /* END DoS Evasive Maneuvers Code */
 
-    if (ret == HTTP_TOO_MANY_REQUESTS
+    if (ret == HTTP_CUSTOM_ERROR
 	&& (ap_satisfies(r) != SATISFY_ANY || !ap_some_auth_required(r))) {
         ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
             "client denied by server configuration: %s",
